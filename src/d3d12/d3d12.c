@@ -2165,19 +2165,29 @@ static void fiber_read_bytes(uint8_t reg, uint8_t out[9])
     out[5] = 0x20; out[6] = out[7] = out[8] = 0;
 }
 
+/* reads memory the wrapper may be remapping right now: a region VirtualQuery
+ * reported as readable can be gone a moment later, and a plain read of it would
+ * crash the process */
+static BOOL safe_read(const void *src, void *dst, SIZE_T n)
+{
+    SIZE_T got = 0;
+    return ReadProcessMemory(GetCurrentProcess(), src, dst, n, &got) && got == n;
+}
+
 static uint8_t *find_game_image(void)
 {
     MEMORY_BASIC_INFORMATION mi;
     for (uint8_t *p = (uint8_t *)0x10000; VirtualQuery(p, &mi, sizeof(mi)) == sizeof(mi); p = (uint8_t *)mi.BaseAddress + mi.RegionSize) {
-        const IMAGE_DOS_HEADER *dos = mi.BaseAddress;
-        const IMAGE_NT_HEADERS64 *nt;
+        IMAGE_DOS_HEADER dos;
+        IMAGE_NT_HEADERS64 nt;
         if (mi.State != MEM_COMMIT || mi.RegionSize < 0x1000 || (mi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) || !mi.Protect)
             continue;
-        if (dos->e_magic != IMAGE_DOS_SIGNATURE || dos->e_lfanew <= 0 || dos->e_lfanew > 0x800) continue;
-        nt = (const IMAGE_NT_HEADERS64 *)((const uint8_t *)dos + dos->e_lfanew);
-        if (nt->Signature == IMAGE_NT_SIGNATURE && nt->FileHeader.TimeDateStamp == GAME_TIMESTAMP &&
-            nt->OptionalHeader.SizeOfImage == GAME_IMAGE_SIZE)
-            return (uint8_t *)dos;
+        if (!safe_read(mi.BaseAddress, &dos, sizeof(dos)) || dos.e_magic != IMAGE_DOS_SIGNATURE ||
+            dos.e_lfanew <= 0 || dos.e_lfanew > 0x800)
+            continue;
+        if (safe_read((const uint8_t *)mi.BaseAddress + dos.e_lfanew, &nt, sizeof(nt)) && nt.Signature == IMAGE_NT_SIGNATURE &&
+            nt.FileHeader.TimeDateStamp == GAME_TIMESTAMP && nt.OptionalHeader.SizeOfImage == GAME_IMAGE_SIZE)
+            return (uint8_t *)mi.BaseAddress;
     }
     return NULL;
 }
@@ -2186,14 +2196,10 @@ static uint8_t *find_game_image(void)
  * headers first and the sections a little later */
 static BOOL fiber_sites_ready(const uint8_t *game)
 {
-    uint8_t want[9];
-    MEMORY_BASIC_INFORMATION mi;
+    uint8_t want[9], have[9];
     for (size_t i = 0; i < sizeof(fiber_sites) / sizeof(fiber_sites[0]); i++) {
-        if (VirtualQuery(game + fiber_sites[i].rva, &mi, sizeof(mi)) != sizeof(mi) || mi.State != MEM_COMMIT ||
-            (mi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) || !mi.Protect)
-            return FALSE;
         fiber_read_bytes(fiber_sites[i].reg, want);
-        if (memcmp(game + fiber_sites[i].rva, want, 9)) return FALSE;
+        if (!safe_read(game + fiber_sites[i].rva, have, 9) || memcmp(have, want, 9)) return FALSE;
     }
     return TRUE;
 }
