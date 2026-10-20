@@ -2198,9 +2198,13 @@ static BOOL fiber_sites_ready(const uint8_t *game)
     return TRUE;
 }
 
+static volatile LONG fiber_patched;
+static uint8_t *volatile fiber_game;
+
 static BOOL patch_fiber_reads(uint8_t *game)
 {
     uint8_t *caves[11] = {0}, *o;
+    if (InterlockedCompareExchange(&fiber_patched, 1, 0)) return TRUE;   /* once: thread or exception handler */
     DWORD old;
     size_t n = sizeof(fiber_sites) / sizeof(fiber_sites[0]);
     /* caves: 16-byte runs of int3 padding after the first site, one per register */
@@ -2237,6 +2241,38 @@ static BOOL patch_fiber_reads(uint8_t *game)
     return TRUE;
 }
 
+/* Safety net for the race above: if a game thread runs a fiber read before the
+ * patch, the bad value (a Mach port number) faults on first use. The handler
+ * recognises that fault (inside the game image, at an address just above the bad
+ * value gs:[0x20] gives on this thread), puts the real FiberData into every
+ * register that holds the bad value, patches all sites and resumes the thread. */
+static LONG WINAPI fiber_fault_handler(EXCEPTION_POINTERS *ep)
+{
+    EXCEPTION_RECORD *er = ep->ExceptionRecord;
+    CONTEXT *c = ep->ContextRecord;
+    DWORD64 *regs[] = {&c->Rax, &c->Rcx, &c->Rdx, &c->Rbx, &c->Rbp, &c->Rsi, &c->Rdi, &c->R8,
+                       &c->R9, &c->R10, &c->R11, &c->R12, &c->R13, &c->R14, &c->R15};
+    DWORD64 bad, good, addr;
+    uint8_t *game = fiber_game;
+    int fixed = 0;
+    if (er->ExceptionCode != EXCEPTION_ACCESS_VIOLATION || er->NumberParameters < 2) return EXCEPTION_CONTINUE_SEARCH;
+    /* cheap checks first: other access violations must not pay for the image search */
+    bad = __readgsqword(0x20);
+    good = (DWORD64)(uintptr_t)((NT_TIB *)NtCurrentTeb())->FiberData;
+    addr = er->ExceptionInformation[1];
+    if (bad == good || addr < bad || addr >= bad + 0x1000) return EXCEPTION_CONTINUE_SEARCH;
+    if (!game && !(game = find_game_image())) return EXCEPTION_CONTINUE_SEARCH;
+    if (c->Rip < (DWORD64)(uintptr_t)game || c->Rip >= (DWORD64)(uintptr_t)game + GAME_IMAGE_SIZE) return EXCEPTION_CONTINUE_SEARCH;
+    for (size_t i = 0; i < sizeof(regs) / sizeof(regs[0]); i++)
+        if (*regs[i] == bad) { *regs[i] = good; fixed++; }
+    if (!fixed) return EXCEPTION_CONTINUE_SEARCH;
+    fiber_game = game;
+    if (fiber_sites_ready(game)) patch_fiber_reads(game);
+    logmsg("fiber fix: caught a fiber read before the patch at game+%#llx, %d register(s) corrected",
+           (unsigned long long)(c->Rip - (DWORD64)(uintptr_t)game), fixed);
+    return EXCEPTION_CONTINUE_EXECUTION;
+}
+
 static DWORD WINAPI game_fixup_thread(void *arg)
 {
     DWORD start = GetTickCount();
@@ -2245,7 +2281,9 @@ static DWORD WINAPI game_fixup_thread(void *arg)
     DWORD found = 0;
     /* the launcher can stay open for minutes before the game is mapped */
     while (GetTickCount() - start < 1800000) {
+        if (fiber_patched) return 0;   /* the exception handler got there first */
         if (!game && (game = find_game_image())) {
+            fiber_game = game;
             found = GetTickCount();
             logmsg("game image found at %p after %lu ms", game, found - start);
         }
@@ -3781,8 +3819,10 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, void *reserved)
     CloseHandle(CreateThread(NULL, 0, signal_worker, NULL, 0, NULL));
     {
         char v[8] = "";
-        if (!(GetEnvironmentVariableA("FH2_FIBER", v, sizeof(v)) && v[0] == '0') && GetModuleHandleA("azimuth.exe"))
+        if (!(GetEnvironmentVariableA("FH2_FIBER", v, sizeof(v)) && v[0] == '0') && GetModuleHandleA("azimuth.exe")) {
+            AddVectoredExceptionHandler(1, fiber_fault_handler);
             CloseHandle(CreateThread(NULL, 0, game_fixup_thread, NULL, 0, NULL));
+        }
     }
     logmsg("fh2port d3d12 proxy loaded, real d3d12 %p", real);
     return real_create_device && real_get_debug_interface && real_serialize_rs;
