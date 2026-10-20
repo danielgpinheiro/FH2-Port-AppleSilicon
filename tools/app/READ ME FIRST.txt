@@ -1,0 +1,102 @@
+FH2 PORT for Apple Silicon Macs
+===============================
+(Italiano più sotto)
+
+Requires macOS 15 or later, an Apple Silicon Mac and CrossOver with D3DMetal
+(tested with CrossOver on Wine 11 and Game Porting Toolkit 4.0b3).
+
+Not affiliated with or endorsed by Microsoft, Xbox Game Studios, Playground
+Games or Almost There Games. This app contains no game files, no Azimuth files
+and no keys, and it never modifies Azimuth. You need:
+  - your own legitimate copy of Forza Horizon 2 for Xbox One (1.0.0.64);
+  - Azimuth 0.9.10, downloaded only from https://almost-there-games.itch.io/azimuth
+    (Almost There Games does not support setups that add third-party layers);
+  - Microsoft's d3dcompiler_47.dll in the Azimuth folder (see the README).
+
+1. PREPARE CROSSOVER
+   Create a Windows 10 64-bit bottle, copy the Azimuth folder into its drive_c
+   and run azimuth.exe once from CrossOver to choose your game folder.
+
+2. INSTALL
+   Drag "FH2 Port" onto the "Applications" folder in this window.
+
+3. FIRST LAUNCH ONLY: allow the app
+   The app is not notarized by Apple, so macOS blocks it the first time.
+   a. Open Applications and double-click FH2 Port. A message says Apple could
+      not verify it. Click "Done" (do NOT click "Move to Trash").
+   b. Open System Settings > Privacy & Security. Scroll down to the message
+      "FH2 Port was blocked..." and click "Open Anyway".
+   c. Enter your Mac password, then click "Open Anyway" again.
+   From now on, a double-click is enough.
+
+4. CHOOSE THE BOTTLE AND THE AZIMUTH FOLDER
+   The first time, the app asks for the CrossOver bottle and then for the
+   folder that contains azimuth.exe. It installs its two DLLs next to
+   azimuth.exe, sets the bottle up and starts the game. It remembers your
+   choice. To choose again, or to uninstall the layer, hold the Option key
+   while you open the app.
+
+5. PLAY
+   A DualSense / Xbox controller works, and so does the keyboard:
+   W throttle, S brake, A/D steer, arrows = D-pad, Enter/Space = A,
+   Esc/Backspace = B, Tab = Menu, R = rewind (Y), Q/E = LB/RB.
+   The app sets anti-aliasing off (MSAA is broken on D3DMetal) and renders at
+   1440 lines, which smooths the edges.
+
+PROBLEMS
+   Logs: data/logs in the Azimuth folder (fh2port.log, azimuth.log) and
+   ~/Library/Logs/FH2Port/launcher.log. Please attach them when you open an
+   issue on the project's GitHub page. Do not send reports about this setup
+   to Almost There Games.
+
+
+ITALIANO
+========
+
+Richiede macOS 15 o successivo, un Mac Apple Silicon e CrossOver con D3DMetal
+(provato con CrossOver su Wine 11 e Game Porting Toolkit 4.0b3).
+
+Non affiliato né approvato da Microsoft, Xbox Game Studios, Playground Games o
+Almost There Games. L'app non contiene file del gioco, file di Azimuth o
+chiavi, e non modifica mai Azimuth. Ti servono:
+  - una tua copia legittima di Forza Horizon 2 per Xbox One (1.0.0.64);
+  - Azimuth 0.9.10, scaricato solo da https://almost-there-games.itch.io/azimuth
+    (Almost There Games non dà supporto a chi aggiunge layer di terzi);
+  - il d3dcompiler_47.dll di Microsoft nella cartella di Azimuth (vedi README).
+
+1. PREPARA CROSSOVER
+   Crea una bottle Windows 10 64-bit, copia la cartella di Azimuth nel suo
+   drive_c e avvia azimuth.exe una volta da CrossOver per scegliere la
+   cartella del gioco.
+
+2. INSTALLAZIONE
+   Trascina "FH2 Port" sulla cartella "Applicazioni" in questa finestra.
+
+3. SOLO AL PRIMO AVVIO: autorizza l'app
+   L'app non è notarizzata da Apple, quindi macOS la blocca la prima volta.
+   a. Apri Applicazioni e fai doppio clic su FH2 Port. Un messaggio dice che
+      Apple non può verificarla. Clicca "Fine" (NON "Sposta nel Cestino").
+   b. Apri Impostazioni di Sistema > Privacy e sicurezza. Scorri fino al
+      messaggio "FH2 Port è stato bloccato..." e clicca "Apri comunque".
+   c. Inserisci la password del Mac, poi clicca di nuovo "Apri comunque".
+   Da quel momento basta il doppio clic.
+
+4. SCEGLI LA BOTTLE E LA CARTELLA DI AZIMUTH
+   La prima volta l'app chiede la bottle di CrossOver e poi la cartella che
+   contiene azimuth.exe. Installa le sue due DLL accanto ad azimuth.exe,
+   configura la bottle e avvia il gioco. Ricorda la scelta. Per scegliere di
+   nuovo, o per disinstallare il layer, tieni premuto Opzione (alt) mentre
+   apri l'app.
+
+5. GIOCA
+   Funziona un controller DualSense / Xbox, e anche la tastiera:
+   W acceleratore, S freno, A/D sterzo, frecce = D-pad, Invio/Spazio = A,
+   Esc/Backspace = B, Tab = Menu, R = rewind (Y), Q/E = LB/RB.
+   L'app spegne l'antialiasing (l'MSAA non funziona su D3DMetal) e fa
+   disegnare a 1440 righe, che ammorbidisce i bordi.
+
+PROBLEMI
+   Log: data/logs nella cartella di Azimuth (fh2port.log, azimuth.log) e
+   ~/Library/Logs/FH2Port/launcher.log. Allegali quando apri una segnalazione
+   sulla pagina GitHub del progetto. Non mandare segnalazioni su questo setup
+   ad Almost There Games.
