@@ -1,5 +1,10 @@
 # FH2 Port for Apple Silicon
 
+[![A race on a MacBook Pro M1 Max with the Metal HUD (click for the video)](media/race.jpg)](https://github.com/fladnaG86/FH2-Port-AppleSilicon/releases/tag/video)
+
+*MacBook Pro M1 Max, Azimuth set to 60 fps and 1440 lines: about 60 fps, 11–13 ms of GPU per frame
+in races (Metal HUD, top right). [Watch the video](https://github.com/fladnaG86/FH2-Port-AppleSilicon/releases/tag/video).*
+
 **[English](#english) · [Italiano](#italiano)**
 
 > Not affiliated with, endorsed by or connected to Microsoft, Xbox Game Studios, Playground Games,
@@ -95,12 +100,11 @@ Keys count only while the game window has focus; keyboard and controllers work t
 
 ### Known issues
 
-- **Hang / GPU reset crash**: after some minutes the game can stop waiting for a value the GPU
-  should have written. Azimuth then either reports "the GPU passed the work that writes the
-  value … and the value is not there" or its watchdog reports its worker stuck. Both are the same
-  wait (game+0xf92497); Azimuth's worker appears blocked inside a graphics call. Under
-  investigation. 0.1.1 fixes one cause: the layer lost the immediate writes of command lists once
-  more than 4096 lists had been created.
+- **Hang / GPU reset crash**: the game can stop waiting for a value the GPU should have written
+  (Azimuth's "the GPU passed the work that writes the value … and the value is not there", or its
+  watchdog reporting its worker stuck). Before 0.1.1 this happened after 8–20 minutes: the layer
+  lost the immediate writes of command lists once more than 4096 lists had been created. Since
+  that fix a 31-minute session ran clean; please report it if it still happens.
 - MSAA must stay off. The intro movies play (no intro skip).
 
 ### Debugging
@@ -132,7 +136,8 @@ aggiunge solo dei layer *sotto* di lui, come fanno DXVK o vkd3d sotto un gioco:
 - **FH2 Port.app**: un launcher che installa entrambi in una bottle di CrossOver e avvia il gioco.
 
 Sviluppato e provato su MacBook Pro M1 Max (32 GB), macOS 27.2, CrossOver su Wine 11 con GPTK
-4.0b3. Mondo aperto, gare, menu, audio, controller e tastiera funzionano.
+4.0b3. Mondo aperto, gare, menu, audio, controller e tastiera funzionano; con Azimuth a 60 fps e
+1440 righe il gioco sta intorno ai 60 fps ([video](https://github.com/fladnaG86/FH2-Port-AppleSilicon/releases/tag/video)).
 
 ### Cosa fa il layer
 
@@ -195,12 +200,12 @@ insieme. `FH2_KEYBOARD=0` lascia i gamepad di Wine come sono.
 
 ### Problemi noti
 
-- **Blocco / crash con reset della GPU**: dopo qualche minuto il gioco può fermarsi in attesa di
-  un valore che la GPU avrebbe dovuto scrivere. Azimuth allora segnala "the GPU passed the work that
-  writes the value … and the value is not there", oppure il suo watchdog segnala il worker
-  bloccato. È la stessa attesa (game+0xf92497); il worker di Azimuth sembra fermo dentro una
-  chiamata grafica. In analisi. La 0.1.1 corregge una causa: il layer perdeva le scritture
-  immediate delle command list dopo che ne erano state create più di 4096.
+- **Blocco / crash con reset della GPU**: il gioco può fermarsi in attesa di un valore che la GPU
+  avrebbe dovuto scrivere ("the GPU passed the work that writes the value … and the value is not
+  there" di Azimuth, oppure il suo watchdog che segnala il worker bloccato). Prima della 0.1.1
+  succedeva dopo 8–20 minuti: il layer perdeva le scritture immediate delle command list dopo che
+  ne erano state create più di 4096. Dopo quella correzione una sessione di 31 minuti è andata
+  liscia; se succede ancora, segnalalo.
 - L'MSAA va lasciato spento. I filmati iniziali vengono riprodotti (niente salto dell'intro).
 
 ### Licenza
