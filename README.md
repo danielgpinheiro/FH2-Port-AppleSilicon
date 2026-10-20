@@ -95,10 +95,12 @@ Keys count only while the game window has focus; keyboard and controllers work t
 
 ### Known issues
 
-- **GPU reset crash**: after roughly 8–20 minutes Azimuth stops with "the GPU passed the work that
-  writes the value … and the value is not there". Under investigation (`FH2_LABEL=<address>` traces
-  that value).
-- **Intermittent hang**: rarely the game stops with Azimuth's watchdog reporting its worker stuck.
+- **Hang / GPU reset crash**: after some minutes the game can stop waiting for a value the GPU
+  should have written. Azimuth then either reports "the GPU passed the work that writes the
+  value … and the value is not there" or its watchdog reports its worker stuck. Both are the same
+  wait (game+0xf92497); Azimuth's worker appears blocked inside a graphics call. Under
+  investigation. 0.1.1 fixes one cause: the layer lost the immediate writes of command lists once
+  more than 4096 lists had been created.
 - MSAA must stay off. The intro movies play (no intro skip).
 
 ### Debugging
@@ -107,8 +109,10 @@ Logs are in `data/logs` of the Azimuth folder (`fh2port.log`, `fh2pad.log`, `azi
 `~/Library/Logs/FH2Port/launcher.log`. Switches: `FH2_COUNT=1` (per-PSO draw counters),
 `FH2_TINT=1` (magenta twins of instanced PSOs for live bisection), `FH2_APPEND=0` (layouts passed
 through unfixed), `FH2_FIBER=0`, `FH2_TILED=1`, `FH2_SKIP_EI=1`, `FH2_SKIP_VID=1`, `FH2_PATCH=…`,
-`FH2_LABEL=…`. Live commands go through `data/logs/fh2port.ctl` (`top`, `reset`, `dump N`,
-`tint …`, `tintlist`, `tintset …`, `watch …`, `patch on|off`).
+`FH2_LABEL=<address>` (traces the values written to that address through record, execute, signal
+and completion). Live commands go through `data/logs/fh2port.ctl` (`top`, `reset`, `dump N`,
+`tint …`, `tintlist`, `tintset …`, `watch …`, `patch on|off`, `stacks` for the Windows-side call
+stack of every thread, useful when the game hangs).
 
 ### License
 
@@ -191,11 +195,12 @@ insieme. `FH2_KEYBOARD=0` lascia i gamepad di Wine come sono.
 
 ### Problemi noti
 
-- **Crash con reset della GPU**: dopo circa 8–20 minuti Azimuth si ferma con "the GPU passed the
-  work that writes the value … and the value is not there". In analisi (`FH2_LABEL=<indirizzo>`
-  traccia quel valore).
-- **Blocco intermittente**: raramente il gioco si ferma e il watchdog di Azimuth segnala il suo
-  worker bloccato.
+- **Blocco / crash con reset della GPU**: dopo qualche minuto il gioco può fermarsi in attesa di
+  un valore che la GPU avrebbe dovuto scrivere. Azimuth allora segnala "the GPU passed the work that
+  writes the value … and the value is not there", oppure il suo watchdog segnala il worker
+  bloccato. È la stessa attesa (game+0xf92497); il worker di Azimuth sembra fermo dentro una
+  chiamata grafica. In analisi. La 0.1.1 corregge una causa: il layer perdeva le scritture
+  immediate delle command list dopo che ne erano state create più di 4096.
 - L'MSAA va lasciato spento. I filmati iniziali vengono riprodotti (niente salto dell'intro).
 
 ### Licenza

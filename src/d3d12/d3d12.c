@@ -16,6 +16,7 @@
 #define COBJMACROS
 #include <windows.h>
 #include <d3d12.h>
+#include <tlhelp32.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
@@ -140,7 +141,11 @@ typedef struct {
     void *list; imm_write *w; UINT n, cap; void *pso;
     D3D12_VERTEX_BUFFER_VIEW vb[4]; D3D12_GPU_VIRTUAL_ADDRESS root_srv[16]; BOOL watch;
 } list_writes;
-#define LIST_TABLE 4096
+/* every command list that records writes gets an entry; entries are freed when
+ * the list is destroyed (hk_list_release), otherwise the table fills up after a
+ * few thousand lists and later lists silently lose their writes */
+#define LIST_TABLE 16384
+#define LIST_GONE ((void *)1)   /* tombstone: keeps probe chains intact */
 static list_writes list_table[LIST_TABLE];
 static CRITICAL_SECTION list_cs;
 static imm_write *staged;
@@ -168,6 +173,17 @@ static void label_note(const imm_write *w, BOOL applied)
     *last = w->value;
 }
 
+/* the label values in a set of writes, for the trace: first and last, or -1 */
+static void label_span(const imm_write *w, UINT n, LONG *first, LONG *last)
+{
+    *first = *last = -1;
+    for (UINT i = 0; label_addr && i < n; i++)
+        if (w[i].dst == label_addr) {
+            if (*first == -1) *first = w[i].value;
+            *last = w[i].value;
+        }
+}
+
 static void push_write(imm_write **w, UINT *n, UINT *cap, imm_write v)
 {
     if (*n == *cap) {
@@ -181,16 +197,38 @@ static void push_write(imm_write **w, UINT *n, UINT *cap, imm_write v)
 /* caller holds list_cs */
 static list_writes *list_entry(void *list, BOOL create)
 {
+    static BOOL full_logged;
     UINT h = (UINT)(((uintptr_t)list >> 4) % LIST_TABLE);
+    list_writes *tomb = NULL;
     for (UINT i = 0; i < LIST_TABLE; i++, h = (h + 1) % LIST_TABLE) {
         if (list_table[h].list == list) return &list_table[h];
+        if (list_table[h].list == LIST_GONE) {
+            if (!tomb) tomb = &list_table[h];
+            continue;
+        }
         if (!list_table[h].list) {
             if (!create) return NULL;
-            list_table[h].list = list;
-            return &list_table[h];
+            if (!tomb) tomb = &list_table[h];
+            break;
         }
     }
-    return NULL;
+    if (!create || !tomb) {
+        if (create && !full_logged) { full_logged = TRUE; logmsg("command list table full: writes of new lists are lost"); }
+        return NULL;
+    }
+    memset(tomb, 0, sizeof(*tomb));
+    tomb->list = list;
+    return tomb;
+}
+
+/* caller holds list_cs */
+static void list_forget(void *list)
+{
+    list_writes *e = list_entry(list, FALSE);
+    if (!e) return;
+    if (e->w) HeapFree(GetProcessHeap(), 0, e->w);
+    memset(e, 0, sizeof(*e));
+    e->list = LIST_GONE;
 }
 
 typedef struct job {
@@ -238,6 +276,12 @@ static DWORD WINAPI signal_worker(void *arg)
         stat_imm_applied += j->nw;
         if (j->w) HeapFree(GetProcessHeap(), 0, j->w);
         sync_down();
+        if (label_addr) {
+            LONG first, last;
+            label_span(j->w, j->nw, &first, &last);
+            logmsg("trace done fence %p=%llu labels %ld..%ld (gpu %llu)", (void *)j->fence, (unsigned long long)j->value,
+                   first, last, (unsigned long long)j->gpu_value);
+        }
         ID3D12Fence_Signal(j->fence, j->value);
         ID3D12Fence_Release(j->fence);
         HeapFree(GetProcessHeap(), 0, j);
@@ -280,6 +324,11 @@ static void STDMETHODCALLTYPE hk_execute(ID3D12CommandQueue *q, UINT n, ID3D12Co
         for (UINT i = 0; i < n; i++) {
             list_writes *e = list_entry(lists[i], FALSE);
             for (UINT k = 0; e && k < e->n; k++) push_write(&staged, &nstaged, &capstaged, e->w[k]);
+            if (label_addr && e && e->n) {
+                LONG first, last;
+                label_span(e->w, e->n, &first, &last);
+                if (first != -1) logmsg("trace exec list %p labels %ld..%ld", (void *)lists[i], first, last);
+            }
         }
         LeaveCriticalSection(&list_cs);
         LeaveCriticalSection(&signal_cs);
@@ -309,6 +358,12 @@ static HRESULT STDMETHODCALLTYPE hk_signal(ID3D12CommandQueue *q, ID3D12Fence *f
     j->value = value;
     j->w = staged;
     j->nw = nstaged;
+    if (label_addr) {
+        LONG first, last;
+        label_span(j->w, j->nw, &first, &last);
+        logmsg("trace signal fence %p=%llu labels %ld..%ld (gpu %llu)", (void *)fence, (unsigned long long)value,
+               first, last, (unsigned long long)j->gpu_value);
+    }
     staged = NULL;
     nstaged = capstaged = 0;
     j->next = NULL;
@@ -417,6 +472,19 @@ typedef void (STDMETHODCALLTYPE *wbi_fn)(ID3D12GraphicsCommandList2 *, UINT, con
                                          const D3D12_WRITEBUFFERIMMEDIATE_MODE *);
 static void **list_vt_orig;
 static void *list_vt[LIST_SLOTS];
+
+typedef ULONG (STDMETHODCALLTYPE *release_fn)(void *);
+
+static ULONG STDMETHODCALLTYPE hk_list_release(ID3D12GraphicsCommandList *l)
+{
+    ULONG r = ((release_fn)list_vt_orig[2])(l);
+    if (!r) {
+        EnterCriticalSection(&list_cs);
+        list_forget(l);
+        LeaveCriticalSection(&list_cs);
+    }
+    return r;
+}
 
 static HRESULT STDMETHODCALLTYPE hk_list_reset(ID3D12GraphicsCommandList *l, ID3D12CommandAllocator *a, ID3D12PipelineState *ps)
 {
@@ -710,6 +778,76 @@ static void report_top(void)
     if (!n) logmsg("top: no draws counted");
 }
 
+/* ctl "stacks": the Windows-side call stack of every other thread, as module+offset,
+ * for hangs (a native sample under Rosetta shows nothing but ntdll.so). Each
+ * thread is suspended only to read its registers. */
+typedef HRESULT (WINAPI *get_thread_description_fn)(HANDLE, PWSTR *);
+
+static void describe_address(DWORD64 pc, char *out, size_t n)
+{
+    HMODULE m = NULL;
+    char path[MAX_PATH] = "?";
+    const char *base;
+    if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           (LPCSTR)(uintptr_t)pc, &m) && m) {
+        GetModuleFileNameA(m, path, sizeof(path));
+        base = strrchr(path, '\\');
+        snprintf(out, n, "%s+%#llx", base ? base + 1 : path, (unsigned long long)(pc - (DWORD64)(uintptr_t)m));
+    } else snprintf(out, n, "%#llx", (unsigned long long)pc);
+}
+
+static void dump_stacks(void)
+{
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+    THREADENTRY32 te = {sizeof(te)};
+    get_thread_description_fn describe =
+        (get_thread_description_fn)GetProcAddress(GetModuleHandleA("kernel32.dll"), "GetThreadDescription");
+    DWORD self = GetCurrentThreadId(), pid = GetCurrentProcessId();
+    if (snap == INVALID_HANDLE_VALUE) { logmsg("stacks: no snapshot"); return; }
+    for (BOOL ok = Thread32First(snap, &te); ok; ok = Thread32Next(snap, &te)) {
+        HANDLE t;
+        CONTEXT c;
+        char line[1024], frame[96], name[64] = "";
+        size_t len;
+        PWSTR wname = NULL;
+        BOOL got;
+        if (te.th32OwnerProcessID != pid || te.th32ThreadID == self) continue;
+        if (!(t = OpenThread(THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_LIMITED_INFORMATION, FALSE, te.th32ThreadID)))
+            continue;
+        if (describe && SUCCEEDED(describe(t, &wname)) && wname) {
+            WideCharToMultiByte(CP_UTF8, 0, wname, -1, name, sizeof(name), NULL, NULL);
+            LocalFree(wname);
+        }
+        memset(&c, 0, sizeof(c));
+        c.ContextFlags = CONTEXT_FULL;
+        if (SuspendThread(t) == (DWORD)-1) { CloseHandle(t); continue; }
+        got = GetThreadContext(t, &c);
+        /* resume before walking: the walk takes the loader lock, which the
+         * suspended thread may hold; a hung thread's stack does not move anyway */
+        ResumeThread(t);
+        if (got) {
+            len = (size_t)snprintf(line, sizeof(line), "stack tid %lu \"%s\":", te.th32ThreadID, name);
+            for (int f = 0; f < 16 && c.Rip && len < sizeof(line) - 100; f++) {
+                DWORD64 image = 0;
+                PRUNTIME_FUNCTION fn = RtlLookupFunctionEntry(c.Rip, &image, NULL);
+                describe_address(c.Rip, frame, sizeof(frame));
+                len += (size_t)snprintf(line + len, sizeof(line) - len, " %s", frame);
+                if (fn) {
+                    void *handler_data;
+                    DWORD64 establisher;
+                    RtlVirtualUnwind(UNW_FLAG_NHANDLER, image, c.Rip, fn, &c, &handler_data, &establisher, NULL);
+                } else {   /* leaf: return address on top of the stack */
+                    c.Rip = *(DWORD64 *)(uintptr_t)c.Rsp;
+                    c.Rsp += 8;
+                }
+            }
+        } else snprintf(line, sizeof(line), "stack tid %lu \"%s\": no context", te.th32ThreadID, name);
+        CloseHandle(t);
+        logmsg("%s", line);
+    }
+    CloseHandle(snap);
+}
+
 /* the instanced PSOs drawn since the last "reset", by shader hash: the candidate
  * list for a "tintset" bisection (needs FH2_COUNT=1 and FH2_TINT=1) */
 static void report_tinted(void)
@@ -747,6 +885,7 @@ static void poll_control(void)
     }
     if (!strncmp(line, "top", 3)) { report_top(); return; }
     if (!strncmp(line, "tintlist", 8)) { report_tinted(); return; }
+    if (!strncmp(line, "stacks", 6)) { dump_stacks(); return; }
     if (!strncmp(line, "patch", 5)) {
         patch_on = strncmp(line + 5, " off", 4) != 0;
         logmsg("patch %s (%ld patched twins)", patch_on ? "on" : "off", n_patched);
@@ -1130,6 +1269,7 @@ static void hook_list(void *list)
     if (!list_vt_orig) {
         list_vt_orig = *obj;
         memcpy(list_vt, list_vt_orig, sizeof(list_vt));
+        list_vt[2] = (void *)hk_list_release;
         list_vt[10] = (void *)hk_list_reset;
         list_vt[12] = (void *)hk_draw;
         list_vt[13] = (void *)hk_draw_indexed;
