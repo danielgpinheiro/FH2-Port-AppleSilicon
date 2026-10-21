@@ -64,7 +64,8 @@ memory**, after Azimuth has loaded the game; the game files on disk stay untouch
 
 The app reads the bottle folder from CrossOver's own **BottleDir** preference, so a custom bottle
 folder works without extra setup, and it lists every CrossOver in `/Applications`, newest D3DMetal
-first.
+first. While the wrapper runs the app stays in the background without a Dock icon and quits when
+the wrapper does; quitting the app ends the wrapper.
 
 The app also sets `antialiasing=off` (MSAA draws dashes in the sky on D3DMetal) and
 `resolution=1440`, which supersamples and smooths the edges.
@@ -180,7 +181,8 @@ memoria**, dopo che Azimuth ha caricato il gioco; i file del gioco su disco rest
 
 L'app legge la cartella delle bottle dalla preferenza **BottleDir** di CrossOver, quindi una
 cartella personalizzata funziona senza altri passaggi, ed elenca ogni CrossOver in `/Applications`
-partendo dal D3DMetal più recente.
+partendo dal D3DMetal più recente. Mentre il wrapper gira l'app resta in background senza icona nel
+Dock ed esce quando esce il wrapper; chiudendo l'app si chiude anche il wrapper.
 
 L'app imposta anche `antialiasing=off` (con l'MSAA il cielo ha dei trattini su D3DMetal) e
 `resolution=1440`, che fa supersampling e ammorbidisce i bordi.

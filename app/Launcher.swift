@@ -246,6 +246,57 @@ func ensureInstalled(_ t: Target) -> Bool {
     return true
 }
 
+/// Runs a command and waits for it, capturing its output.
+@discardableResult
+func runCaptured(_ tool: String, _ args: [String]) -> (Int32, String) {
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: tool)
+    p.arguments = args
+    let pipe = Pipe()
+    p.standardOutput = pipe
+    p.standardError = pipe
+    do { try p.run() } catch { return (-1, "\(error)") }
+    let out = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    p.waitUntilExit()
+    return (p.terminationStatus, out)
+}
+
+/// TRUE while the wrapper is running. The launchd job ends as soon as wine is
+/// handed the program, so the process inside the bottle is what counts:
+/// wineloader carries the exe path in its command line.
+func wrapperRunning() -> Bool {
+    runCaptured("/usr/bin/pgrep", ["-f", "azimuth.exe"]).0 == 0
+}
+
+/// Waits for the wrapper to appear, so a launch that dies early is reported
+/// instead of leaving the user with nothing but a closed app.
+func waitForWrapper(_ timeout: Double) -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        if wrapperRunning() { return true }
+        Thread.sleep(forTimeInterval: 0.5)
+    }
+    return wrapperRunning()
+}
+
+/// Starts run.sh --wait and leaves it running. The wrapper has to stay a child
+/// of this app: what a launchd job leaves behind is killed when the job ends,
+/// which is why an app that quit right after starting wine took the wineserver
+/// with it — and why the start cannot be handed to launchd either, since those
+/// jobs get no window server and wine exits without a word.
+func startWrapper(_ t: Target) -> Process? {
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/bin/zsh")
+    p.arguments = [scriptsDir.appendingPathComponent("run.sh").path, "--wait"]
+    p.environment = ProcessInfo.processInfo.environment.merging(t.env) { $1 }
+    do { try p.run() } catch {
+        log("run.sh failed to start: \(error)")
+        return nil
+    }
+    log("run.sh --wait -> pid \(p.processIdentifier)")
+    return p
+}
+
 func main() {
     NSApp.setActivationPolicy(.regular)
     let installs = crossOverInstalls()
@@ -272,8 +323,28 @@ func main() {
         }
     }
     guard let t = target, ensureInstalled(t) else { return }
-    let (status, out) = runScript("run.sh", [], env: t.env)
-    if status != 0 { _ = alert("Could not start the game", String(out.suffix(800))) }
+    if wrapperRunning() {
+        _ = alert("The wrapper is already running",
+                  "Quit it in the bottle (or let CrossOver shut it down) and open this app again.")
+        return
+    }
+    guard let child = startWrapper(t) else {
+        _ = alert("Could not start the game", "run.sh could not be started. See \(logURL.path).")
+        return
+    }
+    // Wine refuses to start for its own reasons (wrong CrossOver, a bottle it
+    // cannot open); nothing appears then, and wine.log says why.
+    guard waitForWrapper(20) else {
+        child.terminate()
+        let wineLog = t.wrapperDir.appendingPathComponent("data/logs/wine.log")
+        let text = (try? String(contentsOf: wineLog, encoding: .utf8)) ?? ""
+        _ = alert("The wrapper did not start", text.isEmpty ? "wine exited without a message." : String(text.suffix(800)))
+        return
+    }
+    // Stay alive without a Dock icon while the wrapper runs: its processes are
+    // ours, and they die with this app's launchd job.
+    NSApp.setActivationPolicy(.accessory)
+    child.waitUntilExit()
 }
 
 let app = NSApplication.shared
